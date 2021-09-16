@@ -1,4 +1,4 @@
-﻿$VerbosePreference = "Continue"
+$VerbosePreference = "Continue"
 Write-Verbose -Message ("{0} - {1}" -f (Get-Date).ToString(),"....THIS IS A SCRIPT TO CREATE VIRTUAL MACHINE IN AZURE....")
 # Verify Login
 Write-Verbose -Message ("{0} - {1}" -f (Get-Date).ToString(),"Verifying the Azure login subscription status...")
@@ -280,20 +280,26 @@ switch ($OSType) {
                 {
                 Write-Host "There is no Shared Image in subscription $sub...Selecting Image from market place..." -ForegroundColor DarkYellow
 
-                $IMG = Get-AzVMImagePublisher -Location $Region | ? {$_.PublisherName -eq 'MicrosoftWindowsServer'} | Get-AzVMImageOffer | ? {$_.offer -eq 'WindowsServer' } | Get-AzVMImageSku | select Skus
+                ##$IMG = Get-AzVMImagePublisher -Location $Region | ? {$_.PublisherName -eq 'MicrosoftWindowsServer'} | Get-AzVMImageOffer | ? {$_.offer -eq 'WindowsServer' } | Get-AzVMImageSku | select Skus
+
+                #### TRY BELOW COMMAND TO FIND IMAGE
+                $IMG = Get-AzVMImagePublisher -Location $Region | ? {$_.PublisherName -like "Microsoft*Server"} | Get-AzVMImageOffer | Get-AzVMImageSku | select Skus,Offer,PublisherName,Location
+                ###### END #####
                 
                 #### Selecting SKU for Windows OS
                 $global:o1=0
-                $IMG | Select @{Name="Item_6";Expression={$global:o1++;$global:o1}},Skus -OutVariable menu_6 | format-table -AutoSize
+                $IMG | Select @{Name="Item_6";Expression={$global:o1++;$global:o1}},Skus,Offer,PublisherName -OutVariable menu_6 | format-table -AutoSize
                 $temp_6 = $menu_6 | select -ExpandProperty item_6
                 do {$r_6 = Read-Host "Select an Image from above list: "} until ($r_6 -in $temp_6)
                 $svc_6 = $menu_6 | where {$_.item_6 -eq $r_6}
                 $SKU_Name = $svc_6.Skus
+                $SKU_Offer = $svc_6.Offer
+                $SKU_PubName = $svc_6.PublisherName 
 
                 Write-Verbose -Message ("{0} - {1}" -f (Get-Date).ToString(),"Selecting the SKU: $SKU_Name")
 
-                $VMSourceImage.PublisherName = 'MicrosoftWindowsServer'
-			    $VMSourceImage.Offer = 'WindowsServer'
+                $VMSourceImage.PublisherName = $SKU_PubName
+			    $VMSourceImage.Offer = $SKU_Offer
 			    $VMSourceImage.Skus = $SKU_Name
 
                 }
@@ -467,7 +473,7 @@ else
     {
     $cur5 = Get-Date
     New-AzVM -ResourceGroupName $RG -Location $Region -VM $VMConfig
-    $VM_err = error[0]
+    $VM_err = $Error[0]
      ## Check for VM Creation status
         if ($? -eq 'True')
             {
