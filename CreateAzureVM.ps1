@@ -25,8 +25,8 @@ $TotalSub = $menu | select -ExpandProperty Name
 
 
 $Sub_ID = Get-AzSubscription | ? {$_.Name -eq $sub} | select -ExpandProperty id
-$context = Set-AzContext -Subscription $Sub_ID
-$subName = $context.Subscription.Name
+Set-AzContext -Subscription $Sub_ID
+
 
 Write-Host "The current subscription context is set to $subName" -ForegroundColor Green
 
@@ -268,27 +268,21 @@ $total_data_disk = Get-AzDisk | ? {$_.Name -in $add_Ddisk}
 # OS Type
 
 
-##[hashtable] $VMSourceImage = @{PublisherName='';Offer='';Skus=''}
 [hashtable] $VMSourceImage = @{PublisherName='';Offer='';Skus=''}
-do {$OSType = Read-Host "Select a OSType as 'Windows' or 'Linux': "} until (($OSType -eq 'Windows') -or ($OSType -eq 'Linux'))
-Write-Verbose -Message ("{0} - {1}" -f (Get-Date).ToString(),"Selecting the OSType:$OSType")
-switch ($OSType) {
-	'windows' { 
-         
-            $Img_Gallery = Get-AzGallery
+$Img_Gallery = Get-AzGallery
             if ($null -eq $Img_Gallery)
                 {
                 Write-Host "There is no Shared Image in subscription $sub...Selecting Image from market place..." -ForegroundColor DarkYellow
 
-                ##$IMG = Get-AzVMImagePublisher -Location $Region | ? {$_.PublisherName -eq 'MicrosoftWindowsServer'} | Get-AzVMImageOffer | ? {$_.offer -eq 'WindowsServer' } | Get-AzVMImageSku | select Skus
-
-                #### TRY BELOW COMMAND TO FIND IMAGE
-                $IMG = Get-AzVMImagePublisher -Location $Region | ? {$_.PublisherName -like "Microsoft*Server"} | Get-AzVMImageOffer | Get-AzVMImageSku | select Skus,Offer,PublisherName,Location
+                #### FIND IMAGE
+                $ImgPub = Get-AzVMImagePublisher -Location $Region | ?{$_.PublisherName -eq "MicrosoftWindowsDesktop" -or $_.PublisherName -eq "MicrosoftWindowsServer" -or $_.PublisherName -eq "MicrosoftSQLServer"}
+                $ImgOffer = $ImgPub | Get-AzVMImageOffer | ? {$_.Offer -notlike '*ubuntu*' -and $_.Offer -notlike '*rhel*' -and $_.Offer -notlike '*linux*'}
+                $ImgSKU = $ImgOffer | Get-AzVMImageSku
                 ###### END #####
                 
                 #### Selecting SKU for Windows OS
                 $global:o1=0
-                $IMG | Select @{Name="Item_6";Expression={$global:o1++;$global:o1}},Skus,Offer,PublisherName -OutVariable menu_6 | format-table -AutoSize
+                $ImgSKU | Select @{Name="Item_6";Expression={$global:o1++;$global:o1}},Skus,Offer,PublisherName -OutVariable menu_6 | format-table -AutoSize
                 $temp_6 = $menu_6 | select -ExpandProperty item_6
                 do {$r_6 = Read-Host "Select an Image from above list: "} until ($r_6 -in $temp_6)
                 $svc_6 = $menu_6 | where {$_.item_6 -eq $r_6}
@@ -335,16 +329,6 @@ switch ($OSType) {
 
                 }
 
-            }
-	'Linux'	{
-				<# $VMSourceImage.PublisherName = 'Canonical'
-				$VMSourceImage.Offer = 'UbuntuServer'
-				$VMSourceImage.Skus = '18.10-DAILY' #>
-            Write-Host "This section needs to be be further developed. Please try selecting 'Windows' for next run to complete the script run successfully" -ForegroundColor Red
-            exit
-			}  
-}
-
 ##################### VM Config - BEGIN #####
 $cur3 = Get-Date
 # Create a virtual machine configuration
@@ -353,17 +337,9 @@ $VMConfig = New-AzVMConfig -VMName $VMName -VMSize $VMSize
 
 
 
-############### ABOVE CODE NEEDS CORRECTION - END ####
-
 Write-Verbose -Message ("{0} - {1}" -f (Get-Date).ToString(),"Choosing VMSize:$VMSize")
-if ($OSType -eq 'windows')
-{
-	$VMConfig | Set-AzVMOperatingSystem -Windows -ComputerName $VMName -Credential $VMCredential | Out-Null
-}
-else 
-{
-	$VMConfig | Set-AzVMOperatingSystem -Linux -ComputerName $VMName -Credential $VMCredential | Out-Null
-}
+$VMConfig | Set-AzVMOperatingSystem -Windows -ComputerName $VMName -Credential $VMCredential | Out-Null
+
 $VMSourceImage
 $OSDiskName = $VMName + "-OSDISK-" + $(Get-Random).ToString()
 $VMConfig | Set-AzVMSourceImage -PublisherName $VMSourceImage.PublisherName -Offer $VMSourceImage.Offer -Skus $VMSourceImage.Skus -Version latest | Out-Null
@@ -376,6 +352,10 @@ $diff3= New-TimeSpan -Start $cur3 -End $end3
 $time = $time.Add($diff3)
 ## SELECT STORAGE ACCOUNT TO STORE BOOT DIAGNOSTIC LOG ####
 
+do {$bootdiag_choice = Read-Host "Do you want to enable BOOT DIAGNOSTIC for $VMName (Yes/No)"} until (($bootdiag_choice -eq 'Yes') -or ($bootdiag_choice -eq 'No'))
+
+if ($bootdiag_choice -eq "Yes")
+{
 $st_accounts = Get-AzStorageAccount
 
 $stacclist = $st_accounts | select -ExpandProperty StorageAccountName
@@ -429,7 +409,11 @@ else
 
     Write-Verbose -Message ("{0} - {1}" -f (Get-Date).ToString(),"Configuring boot diagnostics...")
     }
-
+   }
+   else
+    {
+    Write-Host "User opted to not enable BOOT DIAGNOSTIC for $VMName" -ForegroundColor Magenta
+    }
 #### TAG for NEW VM
 do {$tag_choice = Read-Host "Do you want to create TAG for $VMName (Yes/No)"} until (($tag_choice -eq 'Yes') -or ($tag_choice -eq 'No'))
 
@@ -454,7 +438,7 @@ if ($tag_choice -eq 'Yes')
     {
     $cur5 = Get-Date
     New-AzVM -ResourceGroupName $RG -Location $Region -VM $VMConfig -Tag $tag
-    $VM_err = $Error[0] 
+    
     ## Check for VM Creation status
         if ($? -eq 'True')
             {
@@ -465,6 +449,7 @@ if ($tag_choice -eq 'Yes')
             {
             Write-Host "$VMName could not be created as there was some error while creating..." -ForegroundColor Red -BackgroundColor Yellow
             }
+    $VM_err = $Error[0] 
     $end5 = Get-Date
     $diff5= New-TimeSpan -Start $cur5 -End $end5
     $time = $time.Add($diff5)
@@ -473,8 +458,7 @@ else
     {
     $cur5 = Get-Date
     New-AzVM -ResourceGroupName $RG -Location $Region -VM $VMConfig
-    $VM_err = $Error[0]
-     ## Check for VM Creation status
+    ## Check for VM Creation status
         if ($? -eq 'True')
             {
             Write-Host "$VMName VM successfully created ..." -ForegroundColor Black -BackgroundColor White
@@ -484,6 +468,7 @@ else
             {
             Write-Host "$VMName could not be created as there was some error while creating..." -ForegroundColor Red -BackgroundColor Yellow
             }
+    $VM_err = $Error[0] 
     $end5 = Get-Date
     $diff5= New-TimeSpan -Start $cur5 -End $end5
     $time = $time.Add($diff5)
@@ -517,51 +502,15 @@ else
 if ($null -eq $vm)
     {
     Write-Host "VM $VMName failed to get created... Error details provided below...." -ForegroundColor Red -BackgroundColor White
-    $VM_err
-
-    Write-Host "Deleting NIC. Details below..." -ForegroundColor DarkYellow
-    $nw = Get-AzNetworkInterface | ? {($_.Name -eq $NICName) -and ($_.VirtualMachine -eq $null)}
-
-    $Lock = Get-AzResourceLock | ? {$_.ResourceGroupName -eq $nw.ResourceGroupName}
-    $Lock_name = $Lock.Name
-    $Lock_RG = $Lock.ResourceGroupName
-    if ($null -eq $Lock)
-        {
-        Remove-AzNetworkInterface -Name $nw.Name -ResourceGroupName $nw.ResourceGroupName -Force
-        }
-    else
-        {
-        Remove-AzResourceLock -ResourceGroupName $Lock_RG -LockName $lock_name -Force
-        $err1 = $error[0]
-    if ($? -eq 'True')
-        {
-        Write-Host "Lock was successfully removed from $Lock_RG..." -ForegroundColor Black -BackgroundColor White
-        Write-Host "Script is paused for 1 minute..." -ForegroundColor Magenta
-        Start-Sleep -Seconds 60
-        Remove-AzNetworkInterface -Name $nw.Name -ResourceGroupName $nw.ResourceGroupName -Force
-
-        }
-    else 
-        {
-        Write-Host "Errored while removing from $Lock_RG..." -ForegroundColor red -BackgroundColor White
-        $err1
-        }
-
-    ## Re-apply Locks in the resource group
-    New-AzResourceLock -LockName $Lock_name `
-                   -LockLevel CanNotDelete `
-                   -ResourceGroupName $Lock_RG `
-                   -Force
-     if ($? -eq 'True')
-        {
-        Write-Host "Lock $Lock_name re-applied successfully on resource group $Lock_RG ..." -ForegroundColor Black -BackgroundColor White
-        
-        }
-
-        }
+    Write-Host "$VM_err"
 
     }
 else
+    {
+    
+    do {$bkp_choice = Read-Host "Do you want to create BACKUP for $VMName (Yes/No)"} until (($bkp_choice -eq 'Yes') -or ($bkp_choice -eq 'No'))
+
+    if ($bkp_choice -eq "Yes")
     {
     $Rec_vaults = Get-AzRecoveryServicesVault | ?{$_.Location -eq $vm.Location}
     Write-Verbose -Message ("{0} - {1}" -f (Get-Date).ToString(),"Below is the list of Recovery vaults par of subscription $sub")
@@ -606,6 +555,11 @@ else
         $diff7 = New-TimeSpan -Start $cur7 -End $end7
         $time = $time.Add($diff7)
         Write-Verbose -Message ("{0} - {1}" -f (Get-Date).ToString(),"Configuring Backup...")
+        }
+    }
+    else
+        {
+        Write-Host "User opted to not create backup for $VMName" -ForegroundColor Magenta
         }
     }
 
